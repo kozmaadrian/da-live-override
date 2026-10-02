@@ -1,0 +1,11 @@
+# Local, machine-specific server settings (your da-live folder path).
+config.json
+config.json.tmp
+
+.DS_Store
+node_modules/
+*.log
+.env
+.env.*
+*.pem
+*.crx

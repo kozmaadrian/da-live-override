@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "da-live local override",
+  "version": "2.0.0",
+  "description": "Serve da.live code from a local source while keeping the da.live URL and origin, so auth (IMS) still works.",
+  "permissions": [
+    "debugger",
+    "storage",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://da.live/*",
+    "*://da.page/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "da-live local override"
+  }
+}

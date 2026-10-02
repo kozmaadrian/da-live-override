@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    :root { color-scheme: light dark; }
+
+    body {
+      width: 280px;
+      margin: 0;
+      padding: 14px 16px;
+      font: 13px/1.4 system-ui, sans-serif;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 14px;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      gap: 8px;
+    }
+
+    label { font-weight: 600; }
+
+    input[type="text"] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px 8px;
+      margin-top: 4px;
+      font: inherit;
+    }
+
+    .field { display: block; margin-bottom: 12px; font-weight: 600; }
+    .field input { font-weight: 400; }
+
+    .hint {
+      margin: 0;
+      font-size: 11px;
+      opacity: 0.7;
+    }
+
+    .status {
+      display: block;
+      margin-top: 4px;
+      font-size: 11px;
+      font-weight: 400;
+      opacity: 0.7;
+      overflow-wrap: anywhere;
+    }
+    .status.error { color: #d7373f; opacity: 1; }
+
+    /* toggle */
+    .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; inset: 0; cursor: pointer;
+      background: #999; border-radius: 999px; transition: background 0.15s;
+    }
+    .slider::before {
+      content: ""; position: absolute; height: 16px; width: 16px;
+      left: 3px; top: 3px; background: #fff; border-radius: 50%;
+      transition: transform 0.15s;
+    }
+    input:checked + .slider { background: #1473e6; }
+    input:checked + .slider::before { transform: translateX(18px); }
+  </style>
+</head>
+<body>
+  <h1>da-live local override</h1>
+
+  <div class="row">
+    <label for="enabled">Override enabled</label>
+    <label class="switch">
+      <input type="checkbox" id="enabled" />
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <label class="field">
+    Local server
+    <input type="text" id="localBase" placeholder="http://localhost:5757" />
+  </label>
+
+  <label class="field">
+    da-live folder
+    <input type="text" id="root" placeholder="/path/to/da-live" spellcheck="false" disabled />
+    <span class="status" id="rootStatus" role="status"></span>
+  </label>
+
+  <label class="field">
+    Paths to override
+    <input type="text" id="paths" placeholder="scripts, blocks, styles, deps" />
+  </label>
+
+  <p class="hint">
+    Run <code>node server.js</code> from this extension's folder, choose your
+    da-live folder above, enable the toggle, then load da.live and reload once.
+    Files from the paths above are swapped in-place — the URL stays
+    <code>da.live</code>, so origin and auth are untouched. Uses the debugger
+    API, so Chrome shows a "debugging" banner while a da.live tab is in front.
+  </p>
+
+  <script src="popup.js"></script>
+</body>
+</html>
