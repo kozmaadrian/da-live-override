@@ -6,22 +6,23 @@
  * stays on da.live; this only answers the redirected code requests.
  *
  * Usage:
- *   node server.js [root] [port]
+ *   node server.js                     asks for your da-live folder
+ *   node server.js /path/to/da-live    skips the question
  *   node server.js /path/to/da-live 5757
- * Root:  argument > $DA_LIVE_ROOT > "root" in config.json > current directory.
+ * Root:  argument > $DA_LIVE_ROOT > prompt (defaults to "root" in config.json).
+ *        Without a terminal: "root" in config.json > current directory.
  * Port:  argument > $DA_LIVE_PORT > "port" in config.json > 5757.
  *
- * config.json (next to this file, gitignored) is also written by the
- * extension popup's "da-live folder" setting through the config API below.
+ * The folder you enter is saved to config.json next to this file (gitignored)
+ * and offered as the default next time.
  */
 const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const crypto = require('crypto');
+const readline = require('readline/promises');
 
 const CONFIG_FILE = path.join(__dirname, 'config.json');
-const API_PATH = '/__da-live-override/config';
 
 function readConfig() {
   try {
@@ -42,39 +43,87 @@ function writeConfig(patch) {
 
 const expandHome = (p) => p.replace(/^~(?=$|\/)/, os.homedir());
 
+function isDir(p) {
+  try { return fs.statSync(p).isDirectory(); } catch { return false; }
+}
+
 const fileConfig = readConfig();
-
-// An explicit argument or env var wins over config.json for this run.
-let pinnedBy = null;
-let rootSource = 'current directory';
-let root = process.cwd();
-if (process.argv[2]) {
-  pinnedBy = 'argument';
-  rootSource = 'argument';
-  root = path.resolve(expandHome(process.argv[2]));
-} else if (process.env.DA_LIVE_ROOT) {
-  pinnedBy = 'DA_LIVE_ROOT';
-  rootSource = 'DA_LIVE_ROOT';
-  root = path.resolve(expandHome(process.env.DA_LIVE_ROOT));
-} else if (typeof fileConfig.root === 'string' && fileConfig.root) {
-  rootSource = 'config.json';
-  root = path.resolve(__dirname, expandHome(fileConfig.root));
-}
+const savedRoot = typeof fileConfig.root === 'string' && fileConfig.root
+  ? path.resolve(__dirname, expandHome(fileConfig.root))
+  : null;
 const PORT = Number(process.argv[3] || process.env.DA_LIVE_PORT || fileConfig.port || 5757);
-
-// Chrome derives an unpacked extension's ID from its folder path, and this
-// file lives in that folder. Only that extension (plus any "extensionId" in
-// config.json) may use the config API.
-function unpackedExtensionId(dir) {
-  const hex = crypto.createHash('sha256').update(fs.realpathSync(dir)).digest('hex').slice(0, 32);
-  return [...hex].map((c) => String.fromCharCode(97 + parseInt(c, 16))).join('');
-}
-const ALLOWED_ORIGINS = new Set(
-  [unpackedExtensionId(__dirname), ...[].concat(fileConfig.extensionId || [])]
-    .map((id) => `chrome-extension://${id}`),
-);
 const LOOPBACK_ADDR = /^(127\.|::1$|::ffff:127\.)/;
-const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+
+let root;
+
+// Tab-completes folder names in the prompt.
+function completeFolder(line) {
+  const typed = line.trimStart();
+  if (typed === '~') return [['~/'], typed];
+  const full = expandHome(typed);
+  const base = full.endsWith('/') ? '' : path.basename(full);
+  const dir = full.endsWith('/') ? full : path.dirname(full);
+  let names = [];
+  try {
+    names = fs.readdirSync(path.resolve(dir), { withFileTypes: true })
+      .filter((d) => d.name.startsWith(base) && (base.startsWith('.') || !d.name.startsWith('.')))
+      .filter((d) => d.isDirectory() || (d.isSymbolicLink() && isDir(path.join(dir, d.name))))
+      .map((d) => d.name);
+  } catch { /* unreadable folder: no suggestions */ }
+  const prefix = typed.slice(0, typed.length - base.length);
+  return [names.map((n) => `${prefix}${n}/`), typed];
+}
+
+// Drag-and-drop from Finder pastes escaped (`my\ folder`) or quoted paths.
+function cleanAnswer(answer) {
+  return answer.trim().replace(/^(['"])(.*)\1$/, '$2').replace(/\\(.)/g, '$1');
+}
+
+async function askForRoot() {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    completer: completeFolder,
+  });
+  rl.on('SIGINT', () => {
+    rl.close();
+    process.stdout.write('\n');
+    process.exit(130);
+  });
+  try {
+    for (;;) {
+      const hint = savedRoot ? ` [${savedRoot}]` : '';
+      // eslint-disable-next-line no-await-in-loop
+      const answer = cleanAnswer(await rl.question(`da-live folder${hint}: `));
+      const dir = answer ? path.resolve(expandHome(answer)) : savedRoot;
+      if (dir && isDir(dir)) return dir;
+      if (dir) console.log(`  Not a folder: ${dir}`); // eslint-disable-line no-console
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+async function chooseRoot() {
+  if (process.argv[2]) return { dir: path.resolve(expandHome(process.argv[2])), source: 'argument' };
+  if (process.env.DA_LIVE_ROOT) {
+    return { dir: path.resolve(expandHome(process.env.DA_LIVE_ROOT)), source: 'DA_LIVE_ROOT' };
+  }
+  if (!process.stdin.isTTY) {
+    return savedRoot
+      ? { dir: savedRoot, source: 'config.json' }
+      : { dir: process.cwd(), source: 'current directory' };
+  }
+  const dir = await askForRoot();
+  if (dir !== savedRoot) {
+    try {
+      writeConfig({ root: dir });
+    } catch (e) {
+      console.warn(`  Could not save to config.json: ${e.message}`); // eslint-disable-line no-console
+    }
+  }
+  return { dir, source: dir === savedRoot ? 'config.json' : 'saved to config.json' };
+}
 
 const MIME = {
   '.js': 'text/javascript; charset=utf-8',
@@ -95,90 +144,6 @@ const MIME = {
   '.map': 'application/json; charset=utf-8',
 };
 
-function sendJson(res, status, body, origin) {
-  const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' };
-  if (origin) {
-    headers['Access-Control-Allow-Origin'] = origin;
-    headers.Vary = 'Origin';
-  }
-  res.writeHead(status, headers);
-  res.end(JSON.stringify(body));
-}
-
-const rootInfo = () => ({ root, pinnedBy });
-
-// GET returns the served folder; POST {"root": "/abs/path"} switches to it and
-// saves it to config.json. It can point the server at any folder, so it is
-// limited to this extension: other origins are rejected, and the Host check
-// stops DNS-rebinding pages from posing as localhost.
-function handleConfigApi(req, res) {
-  const { origin, host } = req.headers;
-  const trusted = LOCAL_HOST.test(host || '')
-    && (origin ? ALLOWED_ORIGINS.has(origin) : req.method === 'GET');
-  if (!trusted) {
-    // eslint-disable-next-line no-console
-    console.log(`403  ${req.method} ${API_PATH} from ${origin || 'no origin'}`);
-    sendJson(res, 403, { error: `Origin not allowed: ${origin || '(none)'}` });
-    return;
-  }
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': origin,
-      'Access-Control-Allow-Methods': 'GET, POST',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      Vary: 'Origin',
-    });
-    res.end();
-    return;
-  }
-  if (req.method === 'GET') {
-    sendJson(res, 200, rootInfo(), origin);
-    return;
-  }
-  if (req.method !== 'POST') {
-    sendJson(res, 405, { error: 'Method not allowed' }, origin);
-    return;
-  }
-
-  let body = '';
-  req.setEncoding('utf8');
-  req.on('data', (chunk) => {
-    body += chunk;
-    if (body.length > 16384) req.destroy();
-  });
-  req.on('end', () => {
-    let requested;
-    try {
-      requested = JSON.parse(body).root;
-    } catch {
-      sendJson(res, 400, { error: 'Expected JSON like {"root": "/path/to/da-live"}' }, origin);
-      return;
-    }
-    const raw = typeof requested === 'string' ? expandHome(requested.trim()) : '';
-    if (!raw || !path.isAbsolute(raw)) {
-      sendJson(res, 400, { error: 'Enter an absolute folder path (or ~/…).' }, origin);
-      return;
-    }
-    const next = path.resolve(raw);
-    let isDir = false;
-    try { isDir = fs.statSync(next).isDirectory(); } catch { /* missing */ }
-    if (!isDir) {
-      sendJson(res, 400, { error: `Not a folder: ${next}` }, origin);
-      return;
-    }
-    try {
-      writeConfig({ root: next });
-    } catch (e) {
-      sendJson(res, 500, { error: `Could not save config.json: ${e.message}` }, origin);
-      return;
-    }
-    root = next;
-    // eslint-disable-next-line no-console
-    console.log(`root -> ${root} (saved to config.json)`);
-    sendJson(res, 200, rootInfo(), origin);
-  });
-}
-
 const server = http.createServer((req, res) => {
   // Local use only; never answer other machines on the network.
   if (!LOOPBACK_ADDR.test(req.socket.remoteAddress || '')) {
@@ -196,11 +161,6 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (urlPath === API_PATH) {
-    handleConfigApi(req, res);
-    return;
-  }
-
   // CORS — the page on da.live loads these cross-origin (module scripts need it).
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
@@ -208,6 +168,15 @@ const server = http.createServer((req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
+    return;
+  }
+
+  if (urlPath === '/__da-live-override/health' && (req.method === 'GET' || req.method === 'HEAD')) {
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+    res.end(req.method === 'HEAD' ? undefined : JSON.stringify({ service: 'da-live-override' }));
     return;
   }
 
@@ -248,11 +217,17 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, () => {
-  // eslint-disable-next-line no-console
-  console.log(`da-live static server\n  root: ${root} (from ${rootSource})\n  http://localhost:${PORT}/`);
-  if (!fs.existsSync(root)) {
+chooseRoot().then(({ dir, source }) => {
+  root = dir;
+  server.listen(PORT, () => {
     // eslint-disable-next-line no-console
-    console.warn('  warning: root folder does not exist — set it in the extension popup');
-  }
+    console.log(`da-live static server\n  root: ${root} (${source})\n  http://localhost:${PORT}/`);
+    if (!isDir(root)) {
+      // eslint-disable-next-line no-console
+      console.warn('  warning: root folder does not exist');
+    } else if (!isDir(path.join(root, 'scripts'))) {
+      // eslint-disable-next-line no-console
+      console.warn('  warning: no scripts/ folder here — is this a da-live checkout?');
+    }
+  });
 });

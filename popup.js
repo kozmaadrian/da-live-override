@@ -4,87 +4,54 @@ const DEFAULTS = {
   paths: ['scripts', 'blocks', 'styles', 'deps', 'fonts', 'icons', 'img', 'tools'],
 };
 
-// The da-live folder lives in the server's config.json, not in Chrome storage:
-// the server is what reads the files.
-const API_PATH = '/__da-live-override/config';
-
 const enabledEl = document.querySelector('#enabled');
 const localBaseEl = document.querySelector('#localBase');
-const rootEl = document.querySelector('#root');
-const rootStatusEl = document.querySelector('#rootStatus');
 const pathsEl = document.querySelector('#paths');
+const serverStatusEl = document.querySelector('#serverStatus');
+const serverHelpEl = document.querySelector('#serverHelp');
+let serverRequest = 0;
 
-function serverBase() {
-  return (localBaseEl.value.trim() || DEFAULTS.localBase).replace(/\/+$/, '');
+function hideServerHelp() {
+  if (serverHelpEl.contains(document.activeElement)) localBaseEl.focus();
+  serverHelpEl.hidden = true;
+  serverHelpEl.dataset.dismissed = 'false';
 }
 
-function setStatus(text, isError = false) {
-  rootStatusEl.textContent = text;
-  rootStatusEl.classList.toggle('error', isError);
+for (const event of ['pointerenter', 'focusin']) {
+  serverHelpEl.addEventListener(event, () => {
+    serverHelpEl.dataset.dismissed = 'false';
+  });
 }
+serverHelpEl.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') serverHelpEl.dataset.dismissed = 'true';
+});
 
-function describe(info) {
-  if (!info.pinnedBy) return 'Saved in config.json next to server.js.';
-  const by = info.pinnedBy === 'argument' ? 'a folder argument' : 'DA_LIVE_ROOT';
-  return `The server was started with ${by}, which wins again on restart.`;
-}
-
-async function callApi(init) {
-  let resp;
+async function checkServer() {
+  const seq = ++serverRequest;
+  hideServerHelp();
+  serverStatusEl.dataset.state = 'checking';
+  serverStatusEl.textContent = 'Checking...';
+  serverStatusEl.title = '';
+  const base = (localBaseEl.value.trim() || DEFAULTS.localBase).replace(/\/+$/, '');
   try {
-    resp = await fetch(`${serverBase()}${API_PATH}`, { cache: 'no-store', ...init });
-  } catch {
-    throw new Error(`Server not running at ${serverBase()}. Start it with: node server.js`);
-  }
-  const data = await resp.json().catch(() => ({}));
-  if (resp.status === 403) {
-    throw new Error(`The server rejected this extension. Add "extensionId": "${chrome.runtime.id}" to config.json and restart it.`);
-  }
-  if (resp.status === 404) throw new Error('This server is outdated. Restart server.js.');
-  if (!resp.ok) throw new Error(data.error || `Server error ${resp.status}`);
-  return data;
-}
-
-let rootRequest = 0;
-async function loadRoot() {
-  const seq = ++rootRequest;
-  rootEl.disabled = true;
-  setStatus('Checking server…');
-  try {
-    const info = await callApi();
-    if (seq !== rootRequest) return;
-    rootEl.value = info.root;
-    rootEl.disabled = false;
-    setStatus(describe(info));
-  } catch (e) {
-    if (seq === rootRequest) setStatus(e.message, true);
-  }
-}
-
-async function saveRoot() {
-  const value = rootEl.value.trim();
-  if (!value) {
-    loadRoot();
-    return;
-  }
-  const seq = ++rootRequest;
-  rootEl.disabled = true;
-  setStatus('Saving…');
-  try {
-    const info = await callApi({
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ root: value }),
+    const response = await fetch(`${base}/__da-live-override/health`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(3000),
     });
-    if (seq !== rootRequest) return;
-    rootEl.value = info.root;
-    setStatus(describe(info));
-    // Reload da.live tabs (if the override is on) so they use the new folder.
-    chrome.runtime.sendMessage({ type: 'reapply' }).catch(() => { });
-  } catch (e) {
-    if (seq === rootRequest) setStatus(e.message, true);
-  } finally {
-    if (seq === rootRequest) rootEl.disabled = false;
+    const info = await response.json();
+    if (!response.ok || info.service !== 'da-live-override') {
+      throw new Error('The local server did not return a valid health response.');
+    }
+    if (seq !== serverRequest) return;
+    serverStatusEl.dataset.state = 'reachable';
+    serverStatusEl.textContent = 'Reachable';
+    serverStatusEl.title = 'Local server is responding.';
+  } catch (error) {
+    if (seq !== serverRequest) return;
+    serverStatusEl.dataset.state = 'unreachable';
+    serverStatusEl.textContent = 'Unreachable';
+    serverStatusEl.title = `Cannot reach ${base}. Start or restart node server.js. ${error.message}`;
+    serverHelpEl.hidden = false;
   }
 }
 
@@ -94,7 +61,7 @@ async function load() {
   enabledEl.checked = !!c.enabled;
   localBaseEl.value = c.localBase;
   pathsEl.value = c.paths.join(', ');
-  loadRoot();
+  checkServer();
 }
 
 async function save() {
@@ -112,10 +79,9 @@ async function save() {
 
 enabledEl.addEventListener('change', save);
 localBaseEl.addEventListener('change', async () => {
+  checkServer();
   await save();
-  loadRoot();
 });
-rootEl.addEventListener('change', saveRoot);
 pathsEl.addEventListener('change', save);
 
 load();

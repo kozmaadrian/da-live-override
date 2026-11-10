@@ -2,108 +2,206 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <title>da-live local override</title>
   <style>
-    :root { color-scheme: light dark; }
-
+    :root {
+      color-scheme: light dark;
+      --surface: #fff;
+      --subtle: #f5f7fa;
+      --text: #202b3d;
+      --muted: #59677b;
+      --border: #dce2eb;
+      --accent: #145bd7;
+    }
+    * { box-sizing: border-box; }
     body {
-      width: 280px;
+      width: 352px;
       margin: 0;
-      padding: 14px 16px;
-      font: 13px/1.4 system-ui, sans-serif;
+      padding: 20px;
+      background: var(--surface);
+      color: var(--text);
+      font: 13px/1.5 system-ui, sans-serif;
     }
-
-    h1 {
-      margin: 0 0 12px;
-      font-size: 14px;
-    }
-
+    header { display: flex; align-items: center; gap: 11px; margin-bottom: 14px; }
+    header img { width: 36px; height: 36px; }
+    h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.4px; }
+    header p { margin: 1px 0 0; color: var(--muted); font-size: 12px; }
     .row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 12px;
-      gap: 8px;
+      padding: 0 0 14px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+      gap: 12px;
     }
-
     label { font-weight: 600; }
-
+    .row p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
     input[type="text"] {
       width: 100%;
-      box-sizing: border-box;
-      padding: 6px 8px;
-      margin-top: 4px;
+      min-width: 0;
+      padding: 9px 11px;
+      margin-top: 7px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface);
+      color: var(--text);
       font: inherit;
     }
-
-    .field { display: block; margin-bottom: 12px; font-weight: 600; }
-    .field input { font-weight: 400; }
-
-    .hint {
-      margin: 0;
-      font-size: 11px;
-      opacity: 0.7;
+    input::placeholder { color: var(--muted); }
+    input:focus-visible, summary:focus-visible, button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
     }
-
-    .status {
-      display: block;
-      margin-top: 4px;
+    .field { display: block; margin-bottom: 16px; }
+    .field-heading { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .server-indicators { display: flex; align-items: center; gap: 5px; }
+    .field-note { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+    .server-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: var(--subtle);
+      color: var(--muted);
       font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .server-status::before {
+      content: "";
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .server-status[data-state="reachable"] { background: #e2f5e9; color: #17653a; }
+    .server-status[data-state="unreachable"] { background: #fde7e9; color: #a32130; }
+    .server-help { display: inline-flex; }
+    .server-help[hidden] { display: none; }
+    .info-button {
+      display: grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      background: var(--surface);
+      color: var(--muted);
+      font: 600 13px/1 system-ui, sans-serif;
+      cursor: help;
+    }
+    .server-tooltip {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      z-index: 1;
+      width: 100%;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--subtle);
+      color: var(--text);
+      box-shadow: 0 6px 18px #00000018;
+      font-size: 12px;
       font-weight: 400;
-      opacity: 0.7;
-      overflow-wrap: anywhere;
+      visibility: hidden;
     }
-    .status.error { color: #d7373f; opacity: 1; }
-
-    /* toggle */
-    .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
-    .switch input { opacity: 0; width: 0; height: 0; }
+    .server-help:hover .server-tooltip,
+    .server-help:focus-within .server-tooltip { visibility: visible; }
+    .server-help[data-dismissed="true"] .server-tooltip { visibility: hidden; }
+    code { font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    details { margin-top: 15px; color: var(--muted); font-size: 12px; }
+    summary { width: fit-content; cursor: pointer; color: var(--text); font-weight: 600; }
+    details p { margin: 8px 0 0; }
+    .switch { position: relative; display: inline-block; flex: 0 0 40px; height: 24px; }
+    .switch input { position: absolute; inset: 0; margin: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
     .slider {
-      position: absolute; inset: 0; cursor: pointer;
-      background: #999; border-radius: 999px; transition: background 0.15s;
+      position: absolute; inset: 0; pointer-events: none;
+      background: #8390a3; border-radius: 999px;
     }
     .slider::before {
-      content: ""; position: absolute; height: 16px; width: 16px;
+      content: ""; position: absolute; height: 18px; width: 18px;
       left: 3px; top: 3px; background: #fff; border-radius: 50%;
-      transition: transform 0.15s;
     }
-    input:checked + .slider { background: #1473e6; }
-    input:checked + .slider::before { transform: translateX(18px); }
+    input:checked + .slider { background: var(--accent); }
+    input:checked + .slider::before { transform: translateX(16px); }
+    input:focus-visible + .slider { outline: 2px solid var(--accent); outline-offset: 3px; }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --surface: #19212d;
+        --subtle: #222d3b;
+        --text: #eef2f8;
+        --muted: #aebbd0;
+        --border: #3b485b;
+        --accent: #80aeff;
+      }
+      input:checked + .slider { background: #276ee0; }
+      .server-status[data-state="reachable"] { background: #193e2b; color: #8de0ad; }
+      .server-status[data-state="unreachable"] { background: #4a222b; color: #ffabb7; }
+    }
+    @media (forced-colors: active) {
+      .slider { border: 1px solid ButtonText; }
+      .slider::before { background: ButtonText; }
+      input:checked + .slider { background: Highlight; }
+    }
   </style>
 </head>
 <body>
-  <h1>da-live local override</h1>
+  <header>
+    <img src="icons/icon-48.png" alt="" width="36" height="36" />
+    <div>
+      <h1>Local override</h1>
+      <p>Your local code. Live on da.live.</p>
+    </div>
+  </header>
 
   <div class="row">
-    <label for="enabled">Override enabled</label>
+    <div>
+      <label for="enabled">Override enabled</label>
+      <p>Reload da.live after changing this.</p>
+    </div>
     <label class="switch">
       <input type="checkbox" id="enabled" />
-      <span class="slider"></span>
+      <span class="slider" aria-hidden="true"></span>
     </label>
   </div>
 
-  <label class="field">
-    Local server
+  <div class="field">
+    <div class="field-heading">
+      <label for="localBase">Local server</label>
+      <div class="server-indicators">
+        <span class="server-status" id="serverStatus" role="status" aria-atomic="true" data-state="checking">Checking...</span>
+        <span class="server-help" id="serverHelp" hidden>
+          <button class="info-button" type="button" aria-label="How to start the local server" aria-describedby="serverTooltip">i</button>
+          <span class="server-tooltip" id="serverTooltip" role="tooltip">
+            Open a terminal in the <strong>da-live-override extension folder</strong>
+            containing <code>server.js</code>, not your da-live checkout.
+            Run <code>node server.js</code>, enter your da-live checkout folder
+            when prompted, and leave the terminal running.
+          </span>
+        </span>
+      </div>
+    </div>
     <input type="text" id="localBase" placeholder="http://localhost:5757" />
-  </label>
+  </div>
 
-  <label class="field">
-    da-live folder
-    <input type="text" id="root" placeholder="/path/to/da-live" spellcheck="false" disabled />
-    <span class="status" id="rootStatus" role="status"></span>
-  </label>
+  <div class="field">
+    <label for="paths">Paths to override</label>
+    <input type="text" id="paths" placeholder="scripts, blocks, styles, deps" aria-describedby="pathsNote" />
+    <p class="field-note" id="pathsNote">Top-level folders, separated by commas.</p>
+  </div>
 
-  <label class="field">
-    Paths to override
-    <input type="text" id="paths" placeholder="scripts, blocks, styles, deps" />
-  </label>
-
-  <p class="hint">
-    Run <code>node server.js</code> from this extension's folder, choose your
-    da-live folder above, enable the toggle, then load da.live and reload once.
-    Files from the paths above are swapped in-place — the URL stays
-    <code>da.live</code>, so origin and auth are untouched. Uses the debugger
-    API, so Chrome shows a "debugging" banner while a da.live tab is in front.
-  </p>
+  <details>
+    <summary>How it works</summary>
+    <p>Enable the override, then reload da.live once. Files from the paths above
+      are swapped in place. The URL stays <code>da.live</code>, so origin and
+      authentication are unchanged.</p>
+    <p>Chrome shows a "debugging" banner while a da.live tab is in front.
+      This is expected: the debugger API replaces the file responses.</p>
+  </details>
 
   <script src="popup.js"></script>
 </body>
